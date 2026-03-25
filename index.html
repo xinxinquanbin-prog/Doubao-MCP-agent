@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>豆包本地技能助手</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: #f8f9fa;
+            color: #1a1a2e;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 320px;
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+            color: #e2e8f0;
+            padding: 1.5rem;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .sidebar h1 {
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .config-section {
+            background: rgba(255,255,255,0.08);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .config-header {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .config-header:hover {
+            background: rgba(255,255,255,0.12);
+        }
+
+        .config-header span {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .config-content {
+            padding: 1rem;
+            background: rgba(255,255,255,0.03);
+            display: none;
+        }
+
+        .config-content.active {
+            display: block;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 14px;
+        }
+
+        .status-label {
+            color: rgba(255,255,255,0.7);
+        }
+
+        .status-value {
+            font-weight: 500;
+        }
+
+        .status-value.success {
+            color: #48bb78;
+        }
+
+        .status-value.warning {
+            color: #ecc94b;
+        }
+
+        .status-value.error {
+            color: #fc8181;
+        }
+
+        .divider {
+            height: 1px;
+            background: rgba(255,255,255,0.1);
+            margin: 1rem 0;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 0.4rem;
+            color: rgba(255,255,255,0.8);
+        }
+
+        .form-group input {
+            width: 100%;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: #ffffff;
+            padding: 0.6rem 0.8rem;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .form-group input:focus {
+            border-color: #667eea;
+            background: rgba(255,255,255,0.15);
+        }
+
+        .form-group input::placeholder {
+            color: rgba(255,255,255,0.4);
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            flex: 1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-weight: 600;
+            padding: 0.6rem 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.3rem;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .toast {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .toast.success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .toast.error {
+            background: #fc8181;
+            color: white;
+        }
+
+        /* 主内容区 */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 900px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .header h1 {
+            color: #1a1a2e;
+            font-weight: 700;
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header p {
+            color: #718096;
+            font-size: 14px;
+        }
+
+        /* 聊天区域 */
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message {
+            display: flex;
+            gap: 0.75rem;
+            max-width: 85%;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+        }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .message.user .avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .message.assistant .avatar {
+            background: #e2e8f0;
+        }
+
+        .message-content {
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            font-size: 15px;
+            line-height: 1.7;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            font-weight: 500;
+            box-shadow: 0 2px 8px rgba(102,126,234,0.3);
+        }
+
+        .message.assistant .message-content {
+            background: #ffffff;
+            color: #2d3748;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        /* 输入区域 */
+        .input-container {
+            padding: 1rem 2rem 2rem;
+        }
+
+        .input-wrapper {
+            display: flex;
+            align-items: center;
+            background: #ffffff;
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 0.5rem 0.5rem 0.5rem 1rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+        }
+
+        .input-wrapper:focus-within {
+            border-color: #667eea;
+            box-shadow: 0 4px 20px rgba(102,126,234,0.15);
+        }
+
+        .input-wrapper input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 15px;
+            color: #1a1a2e;
+            padding: 0.5rem 0;
+            background: transparent;
+        }
+
+        .input-wrapper input::placeholder {
+            color: #a0aec0;
+        }
+
+        .send-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 12px;
+            color: #ffffff;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 加载动画 */
+        .typing-indicator {
+            display: flex;
+            gap: 0.3rem;
+            padding: 1rem 1.25rem;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        /* 提示信息 */
+        .info-box {
+            background: #ebf8ff;
+            border: 1px solid #bee3f8;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #2b6cb0;
+            font-size: 14px;
+        }
+
+        .warning-box {
+            background: #fffaf0;
+            border: 1px solid #fbd38d;
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            margin: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #c05621;
+            font-size: 14px;
+        }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -320px;
+                height: 100vh;
+                z-index: 100;
+                transition: left 0.3s;
+            }
+
+            .sidebar.open {
+                left: 0;
+            }
+
+            .menu-toggle {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <h1>📋 控制面板</h1>
+            
+            <div class="config-section">
+                <div class="config-header" onclick="toggleConfig()">
+                    <span>⚙️ API 配置</span>
+                    <span id="config-arrow">▼</span>
+                </div>
+                <div class="config-content active" id="config-content">
+                    <div class="status-row">
+                        <span class="status-label">状态:</span>
+                        <span class="status-value" id="config-status">⚠️ 配置缺失</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">连接:</span>
+                        <span class="status-value" id="connect-status">❌ 未连接</span>
+                    </div>
+                    
+                    <div class="divider"></div>
+                    
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" id="api-key" placeholder="输入API密钥" value="">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Endpoint ID</label>
+                        <input type="text" id="endpoint-id" placeholder="输入终端ID" value="">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Base URL</label>
+                        <input type="text" id="base-url" placeholder="API地址" value="https://ark.cn-beijing.volces.com/api/v3/chat/completions">
+                    </div>
+                    
+                    <div class="btn-row">
+                        <button class="btn" onclick="saveConfig()">
+                            💾 保存
+                        </button>
+                        <button class="btn" onclick="testConnection()">
+                            🔗 测试
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main">
+            <div class="header">
+                <h1>🤖 豆包本地技能助手</h1>
+                <p>基于 MCP 协议的智能对话助手，支持计算器、天气查询等本地技能</p>
+            </div>
+
+            <div id="info-container"></div>
+
+            <div class="chat-container" id="chat-container">
+                <!-- 消息将在这里动态添加 -->
+            </div>
+
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <input type="text" id="user-input" placeholder="输入您的问题..." onkeypress="handleKeyPress(event)">
+                    <button class="send-btn" id="send-btn" onclick="sendMessage()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 配置状态
+        let config = {
+            apiKey: '',
+            endpointId: '',
+            baseUrl: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+        };
+
+        let isConnected = false;
+        let mcpTools = null;
+        let isProcessing = false;
+
+        // 初始化
+        async function init() {
+            // 从后端获取配置
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/config`);
+                if (response.ok) {
+                    const data = await response.json();
+                    config.apiKey = data.DOUBAO_API_KEY || '';
+                    config.endpointId = data.DOUBAO_ENDPOINT_ID || '';
+                    config.baseUrl = data.DOUBAO_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+                }
+            } catch (error) {
+                console.error('获取配置失败:', error);
+            }
+            
+            // 填充表单
+            document.getElementById('api-key').value = config.apiKey;
+            document.getElementById('endpoint-id').value = config.endpointId;
+            document.getElementById('base-url').value = config.baseUrl;
+            
+            updateConfigStatus();
+            
+            if (config.apiKey && config.endpointId) {
+                testConnection();
+            }
+        }
+
+        // 切换配置面板
+        function toggleConfig() {
+            const content = document.getElementById('config-content');
+            const arrow = document.getElementById('config-arrow');
+            content.classList.toggle('active');
+            arrow.textContent = content.classList.contains('active') ? '▼' : '▶';
+        }
+
+        // 更新配置状态显示
+        function updateConfigStatus() {
+            const configStatus = document.getElementById('config-status');
+            const connectStatus = document.getElementById('connect-status');
+            
+            const hasConfig = config.apiKey && config.endpointId;
+            configStatus.textContent = hasConfig ? '✅ 配置完整' : '⚠️ 配置缺失';
+            configStatus.className = 'status-value ' + (hasConfig ? 'success' : 'warning');
+            
+            connectStatus.textContent = isConnected ? '✅ 连接成功' : '❌ 未连接';
+            connectStatus.className = 'status-value ' + (isConnected ? 'success' : 'error');
+            
+            updateInfoBox();
+        }
+
+        // 更新提示信息
+        function updateInfoBox() {
+            const container = document.getElementById('info-container');
+            const hasConfig = config.apiKey && config.endpointId;
+            
+            if (!hasConfig) {
+                container.innerHTML = '<div class="info-box">👈 请先在左侧配置 API 密钥</div>';
+            } else if (!isConnected) {
+                container.innerHTML = '<div class="warning-box">⚠️ API 连接失败，请检查配置</div>';
+            } else {
+                container.innerHTML = '';
+            }
+        }
+
+        // 保存配置
+        async function saveConfig() {
+            config.apiKey = document.getElementById('api-key').value.trim();
+            config.endpointId = document.getElementById('endpoint-id').value.trim();
+            config.baseUrl = document.getElementById('base-url').value.trim();
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        DOUBAO_API_KEY: config.apiKey,
+                        DOUBAO_ENDPOINT_ID: config.endpointId,
+                        DOUBAO_BASE_URL: config.baseUrl
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    isConnected = false;
+                    mcpTools = null;
+                    updateConfigStatus();
+                    showToast('保存成功!', 'success');
+                } else {
+                    showToast('保存失败: ' + (data.error || ''), 'error');
+                }
+            } catch (error) {
+                showToast('保存失败: ' + error.message, 'error');
+            }
+        }
+
+        // 后端 API 地址（使用相对路径）
+        const API_BASE_URL = '';
+
+        // 测试连接
+        async function testConnection() {
+            if (!config.apiKey || !config.endpointId) {
+                showToast('请先填写 API Key 和 Endpoint ID', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/test-connection`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        api_key: config.apiKey,
+                        endpoint_id: config.endpointId,
+                        base_url: config.baseUrl
+                    })
+                });
+                
+                const data = await response.json();
+                isConnected = data.connected;
+                updateConfigStatus();
+                
+                if (isConnected) {
+                    showToast('连接成功!', 'success');
+                    loadMcpTools();
+                } else {
+                    showToast('连接失败: ' + (data.error || ''), 'error');
+                }
+            } catch (error) {
+                isConnected = false;
+                updateConfigStatus();
+                showToast('连接失败: ' + error.message, 'error');
+            }
+        }
+
+        // 加载 MCP 工具
+        async function loadMcpTools() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/tools`);
+                const data = await response.json();
+                mcpTools = data.tools || [];
+            } catch (error) {
+                console.error('加载工具失败:', error);
+                mcpTools = [];
+            }
+        }
+
+        // 发送消息
+        async function sendMessage() {
+            if (isProcessing) return;
+            
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            if (!isConnected) {
+                showToast('请先配置并测试 API 连接', 'error');
+                return;
+            }
+            
+            input.value = '';
+            addMessage('user', message);
+            
+            isProcessing = true;
+            document.getElementById('send-btn').disabled = true;
+            
+            // 显示输入中动画
+            const typingId = addTypingIndicator();
+            
+            try {
+                // 这里调用后端 API
+                const response = await getAIResponse(message);
+                removeTypingIndicator(typingId);
+                addMessage('assistant', response);
+            } catch (error) {
+                removeTypingIndicator(typingId);
+                addMessage('assistant', '处理失败: ' + error.message);
+            } finally {
+                isProcessing = false;
+                document.getElementById('send-btn').disabled = false;
+            }
+        }
+
+        // 获取 AI 响应
+        async function getAIResponse(userInput) {
+            const response = await fetch(`${API_BASE_URL}/api/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    api_key: config.apiKey,
+                    endpoint_id: config.endpointId,
+                    base_url: config.baseUrl,
+                    message: userInput
+                })
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || '请求失败');
+            }
+            
+            const data = await response.json();
+            return data.response;
+        }
+
+        // 添加消息
+        function addMessage(role, content) {
+            const container = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = role === 'user' ? '👤' : '🤖';
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+            
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            container.appendChild(messageDiv);
+            
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 添加输入中动画
+        function addTypingIndicator() {
+            const container = document.getElementById('chat-container');
+            const id = 'typing-' + Date.now();
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            messageDiv.id = id;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = '🤖';
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            container.appendChild(messageDiv);
+            
+            container.scrollTop = container.scrollHeight;
+            
+            return id;
+        }
+
+        // 移除输入中动画
+        function removeTypingIndicator(id) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.remove();
+            }
+        }
+
+        // 处理回车键
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // 显示提示
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
