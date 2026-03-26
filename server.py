@@ -4,11 +4,16 @@
 import asyncio
 import json
 import os
-from flask import Flask, request, jsonify, send_from_directory
+from collections import defaultdict
+from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+# 对话历史存储
+chat_histories = defaultdict(list)
+MAX_HISTORY = 20
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -117,26 +122,29 @@ def save_config():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def get_tools_in_thread():
+    """在线程中获取工具列表"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(get_mcp_tools())
+    finally:
+        loop.close()
+
 @app.route('/api/tools', methods=['GET'])
 def get_tools():
     """获取可用工具列表"""
     try:
-        tools = asyncio.run(get_mcp_tools())
+        tools = get_tools_in_thread()
         return jsonify({"tools": tools})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/test-connection', methods=['POST'])
-def test_connection():
-    """测试 API 连接"""
-    data = request.json
-    api_key = data.get('api_key', '')
-    endpoint_id = data.get('endpoint_id', '')
-    base_url = data.get('base_url', '')
-    
-    if not api_key or not endpoint_id:
-        return jsonify({"connected": False, "error": "缺少 API Key 或 Endpoint ID"})
+def test_connection_in_thread(api_key, endpoint_id, base_url):
+    """在线程中测试连接"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
     async def _test():
         try:
@@ -158,11 +166,112 @@ def test_connection():
             return False
     
     try:
-        is_connected = asyncio.run(_test())
+        return loop.run_until_complete(_test())
+    finally:
+        loop.close()
+
+@app.route('/api/test-connection', methods=['POST'])
+def test_connection():
+    """测试 API 连接"""
+    data = request.json
+    api_key = data.get('api_key', '')
+    endpoint_id = data.get('endpoint_id', '')
+    base_url = data.get('base_url', '')
+    
+    if not api_key or not endpoint_id:
+        return jsonify({"connected": False, "error": "缺少 API Key 或 Endpoint ID"})
+    
+    try:
+        is_connected = test_connection_in_thread(api_key, endpoint_id, base_url)
         return jsonify({"connected": is_connected})
     except Exception as e:
         return jsonify({"connected": False, "error": str(e)})
 
+
+def chat_in_thread(api_key, endpoint_id, base_url, message, history):
+    """在线程中执行异步聊天函数"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(
+            _chat_async(api_key, endpoint_id, base_url, message, history)
+        )
+    finally:
+        loop.close()
+
+async def _chat_async(api_key, endpoint_id, base_url, user_message, history):
+    """异步聊天函数"""
+    # 获取 MCP 工具
+    tools = await get_mcp_tools()
+    
+    async with httpx.AsyncClient(timeout=60) as http_client:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 使用历史消息
+        messages = history.copy()
+        messages.append({"role": "user", "content": user_message})
+        
+        # 第一次调用豆包 API
+        resp = await http_client.post(
+            url=base_url,
+            headers=headers,
+            json={
+                "model": endpoint_id,
+                "messages": messages,
+                "tools": tools,
+                "temperature": 0.1
+            }
+        )
+        
+        if resp.status_code != 200:
+            return {"response": f"API 调用失败: {resp.status_code}", "messages": messages}
+        
+        result = resp.json()
+        msg = result["choices"][0]["message"]
+        
+        # 检查是否需要调用工具
+        if "tool_calls" in msg:
+            tool_call = msg["tool_calls"][0]
+            tool_name = tool_call["function"]["name"]
+            tool_args = json.loads(tool_call["function"]["arguments"])
+            
+            # 调用 MCP 工具
+            tool_result = await run_mcp_tool(tool_name, tool_args)
+            
+            # 构建第二次调用的消息
+            messages.append(msg)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": tool_result
+            })
+            
+            # 第二次调用豆包 API
+            final_resp = await http_client.post(
+                url=base_url,
+                headers=headers,
+                json={
+                    "model": endpoint_id,
+                    "messages": messages,
+                    "temperature": 0.1
+                }
+            )
+            
+            if final_resp.status_code == 200:
+                final_result = final_resp.json()
+                final_msg = final_result["choices"][0]["message"]
+                messages.append(final_msg)
+                response_content = final_msg.get("content") or tool_result
+                return {"response": f"【调用了工具：{tool_name}】\n\n{response_content}", "messages": messages}
+            else:
+                messages.append({"role": "assistant", "content": tool_result})
+                return {"response": f"【调用了工具：{tool_name}】\n\n{tool_result}", "messages": messages}
+        
+        messages.append(msg)
+        return {"response": msg.get("content", "无响应内容"), "messages": messages}
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -172,6 +281,7 @@ def chat():
     endpoint_id = data.get('endpoint_id', '')
     base_url = data.get('base_url', '')
     user_message = data.get('message', '')
+    session_id = data.get('session_id', 'default')
     
     if not api_key or not endpoint_id:
         return jsonify({"error": "缺少 API Key 或 Endpoint ID"}), 400
@@ -179,39 +289,120 @@ def chat():
     if not user_message:
         return jsonify({"error": "消息内容不能为空"}), 400
     
-    async def _chat():
-        # 获取 MCP 工具
-        tools = await get_mcp_tools()
+    # 获取会话历史
+    messages_history = chat_histories.get(session_id, [])
+    
+    try:
+        result = chat_in_thread(api_key, endpoint_id, base_url, user_message, messages_history)
         
-        async with httpx.AsyncClient(timeout=60) as http_client:
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
+        # 更新历史
+        if "messages" in result:
+            chat_histories[session_id] = result["messages"][-MAX_HISTORY:]
+        
+        return jsonify({"response": result["response"], "session_id": session_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/chat/clear', methods=['POST'])
+def clear_history():
+    """清除对话历史"""
+    data = request.json
+    session_id = data.get('session_id', 'default')
+    
+    if session_id in chat_histories:
+        del chat_histories[session_id]
+    
+    return jsonify({"success": True, "message": "对话历史已清除"})
+
+
+async def _stream_generator(api_key, endpoint_id, base_url, message, history):
+    """异步流式生成器"""
+    async for chunk in _chat_stream_async(api_key, endpoint_id, base_url, message, history):
+        yield chunk
+
+def stream_in_thread(api_key, endpoint_id, base_url, message, history):
+    """在线程中执行异步流式聊天函数"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        generator = _stream_generator(api_key, endpoint_id, base_url, message, history)
+        while True:
+            try:
+                chunk = loop.run_until_complete(generator.__anext__())
+                yield chunk
+            except StopAsyncIteration:
+                break
+    finally:
+        loop.close()
+
+async def _chat_stream_async(api_key, endpoint_id, base_url, user_message, history):
+    """异步流式聊天函数"""
+    # 获取 MCP 工具
+    tools = await get_mcp_tools()
+    
+    # 使用历史消息
+    messages = history.copy()
+    messages.append({"role": "user", "content": user_message})
+    
+    async with httpx.AsyncClient(timeout=60) as http_client:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 第一次调用豆包 API
+        async with http_client.stream(
+            "POST",
+            url=base_url,
+            headers=headers,
+            json={
+                "model": endpoint_id,
+                "messages": messages,
+                "tools": tools,
+                "temperature": 0.1,
+                "stream": True
             }
-            
-            messages = [{"role": "user", "content": user_message}]
-            
-            # 第一次调用豆包 API
-            resp = await http_client.post(
-                url=base_url,
-                headers=headers,
-                json={
-                    "model": endpoint_id,
-                    "messages": messages,
-                    "tools": tools,
-                    "temperature": 0.1
-                }
-            )
-            
+        ) as resp:
             if resp.status_code != 200:
-                return f"API 调用失败: {resp.status_code}"
+                yield f"data: {{\"error\": \"API 调用失败: {resp.status_code}\"}}\n\n"
+                return
             
-            result = resp.json()
-            msg = result["choices"][0]["message"]
+            full_response = ""
+            tool_calls = None
+            tool_call_id = None
+            tool_name = None
+            tool_args = None
+            
+            # 处理流式响应
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line:
+                    continue
+                
+                if line.startswith("data: "):
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    
+                    try:
+                        chunk = json.loads(data)
+                        if "choices" in chunk:
+                            choice = chunk["choices"][0]
+                            if "delta" in choice:
+                                delta = choice["delta"]
+                                if "content" in delta:
+                                    content = delta["content"]
+                                    full_response += content
+                                    yield f"data: {{\"response\": \"{content.replace('\\n', '\\\\n')}\"}}\n\n"
+                                elif "tool_calls" in delta:
+                                    tool_calls = delta["tool_calls"]
+                    except json.JSONDecodeError:
+                        pass
             
             # 检查是否需要调用工具
-            if "tool_calls" in msg:
-                tool_call = msg["tool_calls"][0]
+            if tool_calls:
+                tool_call = tool_calls[0]
+                tool_call_id = tool_call["id"]
                 tool_name = tool_call["function"]["name"]
                 tool_args = json.loads(tool_call["function"]["arguments"])
                 
@@ -219,38 +410,56 @@ def chat():
                 tool_result = await run_mcp_tool(tool_name, tool_args)
                 
                 # 构建第二次调用的消息
-                messages.append(msg)
+                messages.append({"role": "assistant", "tool_calls": tool_calls})
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call["id"],
+                    "tool_call_id": tool_call_id,
                     "content": tool_result
                 })
                 
+                # 发送工具调用提示
+                yield f"data: {{\"response\": \"【调用了工具：{tool_name}】\\n\\n\"}}\n\n"
+                
                 # 第二次调用豆包 API
-                final_resp = await http_client.post(
+                async with http_client.stream(
+                    "POST",
                     url=base_url,
                     headers=headers,
                     json={
                         "model": endpoint_id,
                         "messages": messages,
-                        "temperature": 0.1
+                        "temperature": 0.1,
+                        "stream": True
                     }
-                )
-                
-                if final_resp.status_code == 200:
-                    final_result = final_resp.json()
-                    return final_result["choices"][0]["message"].get("content") or tool_result
-                else:
-                    return tool_result
+                ) as final_resp:
+                    if final_resp.status_code != 200:
+                        yield f"data: {{\"response\": \"{tool_result.replace('\\n', '\\\\n')}\"}}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+                    
+                    async for line in final_resp.aiter_lines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            
+                            try:
+                                chunk = json.loads(data)
+                                if "choices" in chunk:
+                                    choice = chunk["choices"][0]
+                                    if "delta" in choice:
+                                        delta = choice["delta"]
+                                        if "content" in delta:
+                                            content = delta["content"]
+                                            yield f"data: {{\"response\": \"{content.replace('\\n', '\\\\n')}\"}}\n\n"
+                            except json.JSONDecodeError:
+                                pass
             
-            return msg.get("content", "无响应内容")
-    
-    try:
-        response = asyncio.run(_chat())
-        return jsonify({"response": response})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+            yield "data: [DONE]\n\n"
 
 @app.route('/api/chat/stream', methods=['POST'])
 def chat_stream():
@@ -260,9 +469,22 @@ def chat_stream():
     endpoint_id = data.get('endpoint_id', '')
     base_url = data.get('base_url', '')
     user_message = data.get('message', '')
+    session_id = data.get('session_id', 'default')
     
-    # 流式响应实现较复杂，先返回普通响应
-    return chat()
+    if not api_key or not endpoint_id:
+        return jsonify({"error": "缺少 API Key 或 Endpoint ID"}), 400
+    
+    if not user_message:
+        return jsonify({"error": "消息内容不能为空"}), 400
+    
+    # 获取会话历史
+    messages_history = chat_histories.get(session_id, [])
+    
+    def generate():
+        for chunk in stream_in_thread(api_key, endpoint_id, base_url, user_message, messages_history):
+            yield chunk
+    
+    return Response(generate(), mimetype='text/event-stream')
 
 
 @app.route('/')

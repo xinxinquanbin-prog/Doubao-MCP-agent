@@ -5,10 +5,12 @@ MCP 本地技能 + 豆包 Ark API —— 终极稳定版
 ✅ 工具失败必返回回答
 ✅ 天气技能修复
 ✅ 响应速度快
+✅ 支持对话历史
 """
 import os
 import asyncio
 import json
+from collections import defaultdict
 from dotenv import load_dotenv
 import httpx
 from mcp import ClientSession, StdioServerParameters
@@ -31,6 +33,10 @@ MCP_SERVER = StdioServerParameters(
 # 全局缓存：仅缓存工具定义（不缓存会话，彻底解决异步崩溃）
 CACHED_MCP_TOOLS = None
 
+# 对话历史存储
+chat_histories = defaultdict(list)
+MAX_HISTORY = 20
+
 # ===================== 工具调用（稳定版） =====================
 async def run_mcp_tool(tool_name: str, arguments: dict):
     """每次调用新建临时MCP会话，100%无崩溃"""
@@ -44,7 +50,7 @@ async def run_mcp_tool(tool_name: str, arguments: dict):
         return f"工具调用失败：{str(e)}"
 
 # ===================== 对话核心 =====================
-async def chat_with_doubao(user_input: str):
+async def chat_with_doubao(user_input: str, session_id: str = "default"):
     global CACHED_MCP_TOOLS
     http_client = httpx.AsyncClient(timeout=10)
     
@@ -64,10 +70,11 @@ async def chat_with_doubao(user_input: str):
                         }
                     } for t in tools.tools
                 ]
-        print("✅ 本地技能加载完成（仅首次）")
+        # print("✅ 本地技能加载完成（仅首次）")
 
     # 2. 构造请求
-    messages = [{"role": "user", "content": user_input}]
+    messages = chat_histories.get(session_id, []).copy()
+    messages.append({"role": "user", "content": user_input})
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
@@ -116,13 +123,20 @@ async def chat_with_doubao(user_input: str):
                 headers=headers
             )
             final_data = final_resp.json()
-            answer = final_data["choices"][0]["message"]["content"]
+            final_msg = final_data["choices"][0]["message"]
+            messages.append(final_msg)
             
             # 兜底：模型无输出时，直接返回工具结果
-            return answer if answer else tool_result
-
-        # 普通对话直接返回
-        return msg["content"]
+            final_answer = final_msg.get("content") or tool_result
+            response = f"【调用了工具：{tool_name}】\n\n{final_answer}"
+        else:
+            # 普通对话直接返回
+            messages.append(msg)
+            response = msg["content"]
+        
+        # 更新历史
+        chat_histories[session_id] = messages[-MAX_HISTORY:]
+        return response
 
     except Exception as e:
         return f"处理失败：{str(e)}"
@@ -136,6 +150,8 @@ async def main():
     print("✅ 计算器 | 🌤️ 天气查询")
     print("=" * 50)
 
+    session_id = "default"
+    
     while True:
         user_query = input("\n请输入你的问题：").strip()
         if not user_query:
@@ -143,9 +159,14 @@ async def main():
         if user_query.lower() in ["exit", "quit", "退出"]:
             print("👋 再见！")
             break
+        if user_query.lower() in ["clear", "清除历史"]:
+            if session_id in chat_histories:
+                del chat_histories[session_id]
+            print("✅ 对话历史已清除")
+            continue
         
         # 执行对话
-        answer = await chat_with_doubao(user_query)
+        answer = await chat_with_doubao(user_query, session_id)
         print("\n" + "=" * 50)
         print("🤖 豆包回答：")
         print(answer)

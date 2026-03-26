@@ -5,10 +5,10 @@
 ## 项目结构
 
 ```
-d:\agent\
+..
 ├── .env                    # 大模型api配置
 ├── index.html              # 前端 Web 界面
-├── main.py                 # 主入口（可选）
+├── main.py                 # 主入口（命令行界面）
 ├── mcp_server.py          # MCP 服务端（核心）
 ├── server.py               # Flask 后端服务
 ├── requirements.txt        # 依赖清单
@@ -26,20 +26,52 @@ d:\agent\
     └── __init__.py
 ```
 
-## 核心组件
+## 核心功能
 
-1. **前端** (`index.html`) - 基于 HTML/CSS/JavaScript 的 Web 界面
-2. **后端** (`server.py`) - Flask 服务，提供 API 接口
-3. **MCP 服务** (`mcp_server.py`) - 处理技能调用的核心服务
-4. **技能模块** (`skills/`) - 各种自定义技能的实现
-5. **配置** (`config/`) - 全局配置和常量
+✅ **稳定的异步处理** - 修复了Flask路由中直接使用asyncio.run()的问题，使用线程池执行异步函数
+✅ **对话历史管理** - 支持多轮对话，自动保存对话历史，最多保留20轮
+✅ **流式输出** - 实现了完整的SSE流式接口，支持逐字输出体验
+✅ **工具调用提示** - 当调用技能时，会显示"【调用了工具：{工具名称}】"的提示信息
+✅ **多端支持** - 提供Web界面和命令行界面两种交互方式
+✅ **丰富的技能** - 内置计算器和天气查询技能
 
 ## 环境要求
 
 - Python 3.11+
 - 火山引擎豆包 API 密钥（获取 AK/SK）
+- uv 包管理工具（推荐）或 pip
 
 ## 安装
+
+### 方法一：使用 uv 包管理工具（推荐）
+
+1. **安装 uv**
+   ```bash
+   # Windows
+   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser 
+   irm https://astral.sh/uv/install.ps1 | iex
+   
+   # macOS / Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+2. **克隆项目**
+   ```bash
+   git clone https://github.com/taffy123d/Doubao-MCP-agent
+   cd <项目目录>
+   ```
+
+3. **创建虚拟环境**
+   ```bash
+   uv venv
+   ```
+
+4. **安装依赖**
+   ```bash
+   uv sync
+   ```
+
+### 方法二：使用 pip
 
 1. **克隆项目**
    ```bash
@@ -47,19 +79,35 @@ d:\agent\
    cd <项目目录>
    ```
 
-2. **安装依赖**
+2. **创建虚拟环境**
+   ```bash
+   python -m venv venv
+   ```
+
+3. **激活虚拟环境**
+   ```bash
+   # Windows
+   venv\Scripts\activate
+   
+   # macOS / Linux
+   source venv/bin/activate
+   ```
+
+4. **安装依赖**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **配置环境变量**
-   复制 `.env.example` 为 `.env` 并填写 API 密钥：
-   ```env
-   # 火山引擎豆包 API 密钥
-   DOUBAO_API_KEY=你的API密钥
-   DOUBAO_ENDPOINT_ID=你的终端ID
-   DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3/chat/completions
-   ```
+## 配置
+
+在 `.env` 文件中填写 API 密钥：
+
+```env
+# 火山引擎豆包 API 密钥
+DOUBAO_API_KEY=你的API密钥
+DOUBAO_ENDPOINT_ID=你的终端ID
+DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3/chat/completions
+```
 
 ## 运行
 
@@ -72,22 +120,74 @@ python server.py
 - 前端访问：`http://localhost:5000`
 - API 接口：`http://localhost:5000/api/*`
 
-### 方法二：单独启动
+### 方法二：命令行界面
 
-1. **启动 MCP 服务**
-   ```bash
-   python mcp_server.py
-   ```
+```bash
+python main.py
+```
 
-2. **启动后端服务**
-   ```bash
-   python server.py
-   ```
+- 直接在终端中进行对话
+- 支持多轮对话和历史记录
+- 输入 `clear` 或 `清除历史` 可以清除对话历史
+- 输入 `exit`、`quit` 或 `退出` 可以退出程序
 
-3. **打开前端**
-   直接用浏览器打开 `index.html`
+## API 接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 前端页面 |
+| `/api/health` | GET | 健康检查 |
+| `/api/tools` | GET | 获取技能列表 |
+| `/api/config` | GET | 获取配置 |
+| `/api/config` | POST | 保存配置 |
+| `/api/test-connection` | POST | 测试 API 连接 |
+| `/api/chat` | POST | 聊天（支持对话历史） |
+| `/api/chat/stream` | POST | 流式聊天（SSE） |
+| `/api/chat/clear` | POST | 清除对话历史 |
+
+### API 请求示例
+
+#### 聊天接口
+
+```bash
+curl -X POST http://localhost:5000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "你的API密钥",
+    "endpoint_id": "你的终端ID",
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    "message": "北京天气",
+    "session_id": "default"
+  }'
+```
+
+#### 流式聊天接口
+
+```bash
+curl -X POST http://localhost:5000/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "你的API密钥",
+    "endpoint_id": "你的终端ID",
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    "message": "北京天气",
+    "session_id": "default"
+  }'
+```
+
+#### 清除历史接口
+
+```bash
+curl -X POST http://localhost:5000/api/chat/clear \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "default"
+  }'
+```
 
 ## 如何使用
+
+### Web 界面
 
 1. **配置 API**
    - 在左侧配置面板填写 API Key 和 Endpoint ID
@@ -102,6 +202,24 @@ python server.py
 3. **查看结果**
    - 系统会自动调用相应的技能并返回结果
    - 支持多轮对话
+
+### 命令行界面
+
+1. **运行程序**
+   ```bash
+   python main.py
+   ```
+
+2. **输入问题**
+   - 直接在终端中输入你的问题
+   - 支持的技能：
+     - 计算器：`计算 123+456`
+     - 天气查询：`北京天气`
+
+3. **查看结果**
+   - 系统会自动调用相应的技能并返回结果
+   - 支持多轮对话
+   - 输入 `clear` 或 `清除历史` 可以清除对话历史
 
 ## 如何增加新技能
 
@@ -169,17 +287,6 @@ register_my_skill(mcp)  # 添加这一行
 
 重新启动 MCP 服务和后端服务，新技能即可使用。
 
-## API 接口
-
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/` | GET | 前端页面 |
-| `/api/health` | GET | 健康检查 |
-| `/api/tools` | GET | 获取技能列表 |
-| `/api/test-connection` | POST | 测试 API 连接 |
-| `/api/chat` | POST | 聊天（调用技能） |
-| `/api/chat/stream` | POST | 流式聊天（预留） |
-
 ## 技能开发规范
 
 1. **文件命名**：使用小写字母和下划线
@@ -199,6 +306,14 @@ register_my_skill(mcp)  # 添加这一行
 - **功能**：查询城市天气和预报
 - **调用**：`上海天气` 或 `北京天气 3天`
 
+## 技术亮点
+
+1. **异步处理优化** - 使用线程池执行异步函数，避免了每次请求创建新事件循环的问题
+2. **对话历史管理** - 基于 session_id 的历史记录存储，支持多用户场景
+3. **流式输出实现** - 完整的 SSE 流式接口，提供更好的用户体验
+4. **工具调用提示** - 清晰的工具调用提示，提升用户体验
+5. **多端支持** - 同时提供 Web 界面和命令行界面
+
 ## 注意事项
 
 1. **API 密钥安全**：不要将 API 密钥提交到版本控制
@@ -211,12 +326,14 @@ register_my_skill(mcp)  # 添加这一行
 - **连接失败**：检查 API 密钥和网络连接
 - **技能不响应**：检查 MCP 服务是否正常运行
 - **前端不显示**：检查浏览器控制台是否有错误
+- **流式接口问题**：确保网络连接稳定，避免中途断开
 
 ## 扩展建议
 
 1. **更多技能**：添加翻译、股票查询、新闻等技能
 2. **多语言支持**：添加多语言界面
 3. **部署优化**：使用 Docker 容器化部署
+4. **技能市场**：创建技能市场，支持用户分享和下载技能
+5. **模型切换**：支持切换不同的大语言模型
 
 ---
-
