@@ -115,27 +115,51 @@ def register_web_search_tool(mcp: FastMCP):
 
 def _parse_bing_html(html: str, num_results: int) -> list:
     """解析必应搜索结果 HTML"""
+    import html as html_module
+    import urllib.parse
+    import base64
     results = []
     
     # 必应搜索结果pattern
-    # <li class="b_algo"><h2><a href="URL" ...>标题</a></h2><p>摘要...</p></li>
-    item_pattern = r'<li class="b_algo">(.*?)</li>'
-    title_pattern = r'<h2><a[^>]+href="([^"]+)"[^>]*>([^<]+)</a></h2>'
-    snippet_pattern = r'<p>([^<]+)</p>'
+    # <li class="b_algo" data-id=...>...<h2><a href="URL">标题</a></h2><p>摘要...</p></li>
+    item_pattern = r'<li class="b_algo"[^>]*>(.*?)</li>'
+    title_pattern = r'<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>'
     
     items = re.findall(item_pattern, html, re.DOTALL)
     
     for item in items[:num_results]:
-        title_match = re.search(title_pattern, item)
-        snippet_match = re.search(snippet_pattern, item)
-        
-        if title_match:
-            url = title_match.group(1)
-            title = _clean_html(title_match.group(2))
+        # 找链接和标题（多个a标签，取第一个有href的）
+        link_match = re.search(title_pattern, item)
+        if link_match:
+            href = link_match.group(1)
+            title = _clean_html(link_match.group(2))
+            # 清理必应跳转URL，提取真实URL
+            href = _clean_bing_url(href)
+            # 找摘要 - 在<p>标签里
+            snippet_match = re.search(r'<p[^>]*>([^<]+)</p>', item)
             snippet = _clean_html(snippet_match.group(1)) if snippet_match else ""
-            results.append((title, url, snippet))
+            results.append((title, href, snippet))
     
     return results
+
+
+def _clean_bing_url(url: str) -> str:
+    """清理必应搜索结果的跳转URL，提取真实URL"""
+    import base64
+    # 必应跳转URL格式: https://www.bing.com/ck/a?...&u=<base64_url>
+    if 'bing.com/ck/a' in url or 'bing.com/search' in url:
+        # 提取 u= 参数（base64编码的真实URL）
+        match = re.search(r'[?&]u=([^&]+)', url)
+        if match:
+            encoded_url = match.group(1)
+            # Base64解码（需要补全padding）
+            try:
+                padded = encoded_url + '=' * (4 - len(encoded_url) % 4)
+                real_url = base64.b64decode(padded).decode('utf-8')
+                return real_url
+            except:
+                return encoded_url
+    return url
 
 
 def _extract_text(html: str) -> str:
